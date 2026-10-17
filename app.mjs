@@ -1,15 +1,51 @@
-import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { start } from './lib/server.mjs';
+import { run, validate } from './core.mjs';
+export * from './core.mjs';
+export const spec = { ...{
+  "slug": "captionbench",
+  "repo": "captionbench",
+  "owner": "ordinaryleggi",
+  "title": "Captionbench",
+  "purpose": "Check subtitle timing without rewriting the dialogue",
+  "workflow": "A Kite media-workflow agent can pay for a reproducible SRT timing report and an explicit edit history.",
+  "colors": [
+    "#181b22",
+    "#f1f3f6",
+    "#8a6500"
+  ],
+  "required": [
+    "srt"
+  ],
+  "sample": {
+    "srt": "1\n00:00:01,000 --> 00:00:03,000\nWelcome to the workshop.\n\n2\n00:00:02,800 --> 00:00:04,000\nLet us begin.",
+    "cps": 20,
+    "edits": [],
+    "locked": []
+  },
+  "changed": "Strict timestamps, cue identity validation, Unicode reading load, locked edits, full neighbor revalidation and previous SRT snapshots.",
+  "limits": "No transcription, translation, media playback or automatic timing repairs. Returning a report does not certify subtitle quality.",
+  "version": "0.2.0",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "srt"
+    ],
+    "properties": {
+      "srt": {
+        "type": "string"
+      },
+      "cps": {
+        "type": "integer"
+      },
+      "edits": {
+        "type": "array"
+      },
+      "locked": {
+        "type": "array"
+      }
+    }
+  }
+}, run, validate };
+if (process.argv[1] === fileURLToPath(import.meta.url)) start(spec);
 
-function parseTime(value) { const [h, m, rest] = value.replace(',', '.').split(':'); const [s, ms] = rest.split('.'); return Number(h) * 3600000 + Number(m) * 60000 + Number(s) * 1000 + Number(ms.padEnd(3, '0')); }
-function formatTime(ms) { const h = Math.floor(ms / 3600000); ms %= 3600000; const m = Math.floor(ms / 60000); ms %= 60000; const s = Math.floor(ms / 1000); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`; }
-
-export function parseSrt(text) { return text.trim().split(/\n\s*\n/).filter(Boolean).map(block => { const lines = block.split(/\r?\n/); const timing = lines.findIndex(line => line.includes('-->')); if (timing < 0) throw new Error('缺少时间轴'); const [start, end] = lines[timing].split('-->').map(value => value.trim()); return { number: Number(lines[0]), start: parseTime(start), end: parseTime(end), text: lines.slice(timing + 1).join('\n') }; }); }
-
-export function validateCues(cues, charsPerSecond = 20) { return cues.flatMap((cue, index) => { const issues = []; if (cue.start < 0 || cue.end <= cue.start) issues.push({ code: 'invalid-duration', message: '时间区间无效' }); if (index && cue.start < cues[index - 1].end) issues.push({ code: 'overlap', message: `与第 ${cues[index - 1].number} 条重叠` }); const duration = Math.max((cue.end - cue.start) / 1000, 0.001); if (cue.text.replace(/\s/g, '').length / duration > charsPerSecond) issues.push({ code: 'reading-load', message: '阅读速度超过规则上限' }); return issues.map(issue => ({ cue: cue.number, ...issue })); }); }
-
-export function shiftCue(cues, index, delta, locked = new Set()) { if (locked.has(cues[index].number)) throw new Error('锁定条目不能修改'); const next = cues.map(cue => ({ ...cue })); next[index].start += delta; next[index].end += delta; return { cues: next, issues: validateCues(next) }; }
-export function toSrt(cues) { return cues.map(cue => `${cue.number}\n${formatTime(cue.start)} --> ${formatTime(cue.end)}\n${cue.text}`).join('\n\n') + '\n'; }
-
-function html() { return `<!doctype html><meta charset="utf-8"><title>字幕台 · 字幕节奏校对</title><style>body{font:16px system-ui;margin:0;background:#181b22;color:#f1f3f6}main{max-width:1000px;margin:auto;padding:32px}textarea{width:100%;min-height:220px;font:14px ui-monospace;padding:10px;box-sizing:border-box;background:#252a34;color:#f1f3f6;border:1px solid #555}section{border:1px solid #505765;padding:18px;margin:16px 0}button{background:#f7c843;color:#181b22;border:0;padding:10px 14px;border-radius:3px}pre{white-space:pre-wrap;background:#343128;padding:12px}</style><main><p>字幕台 / 字幕节奏校对</p><h1>先指出问题，再由编辑决定怎么改。</h1><textarea id="srt">1\n00:00:01,000 --> 00:00:03,000\n开始之前，我们先认识一下。\n\n2\n00:00:02,800 --> 00:00:03,400\n欢迎来到工作坊。</textarea><p><label>检查上限（字/秒） <input id="cps" value="20" type="number"></label></p><button id="run">校验字幕</button><pre id="out">等待输入</pre></main><script>run.onclick=async()=>{const r=await fetch('/api/check',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({srt:srt.value,cps:Number(cps.value)})});out.textContent=JSON.stringify(await r.json(),null,2)}</script>`; }
-if (process.argv[1] === fileURLToPath(import.meta.url)) createServer((req, res) => { if (req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(html()); return; } let body = ''; req.on('data', c => { body += c; }); req.on('end', () => { try { const input = JSON.parse(body); const cues = parseSrt(input.srt); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ cues, issues: validateCues(cues, input.cps), exported: toSrt(cues) })); } catch (error) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: error.message })); } }); }).listen(process.env.PORT || 3000);
