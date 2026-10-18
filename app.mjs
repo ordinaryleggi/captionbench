@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { start } from './lib/server.mjs';
 import { run, validate } from './core.mjs';
+import { product } from './project.mjs';
 export * from './core.mjs';
 export const spec = { ...{
   "slug": "captionbench",
@@ -25,7 +26,7 @@ export const spec = { ...{
   },
   "changed": "Strict timestamps, cue identity validation, Unicode reading load, locked edits, full neighbor revalidation and previous SRT snapshots.",
   "limits": "No transcription, translation, media playback or automatic timing repairs. Returning a report does not certify subtitle quality.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "inputSchema": {
     "type": "object",
     "required": [
@@ -46,6 +47,6 @@ export const spec = { ...{
       }
     }
   }
-}, run, validate };
+}, run, validate, product };
 if (process.argv[1] === fileURLToPath(import.meta.url)) start(spec);
 
